@@ -1,0 +1,23 @@
+/drift-aware-sdk
+│
+├── /sdk_core              # The reusable SDK Monitoring Layer (Layer 2 & 3)
+│   ├── __init__.py
+│   ├── monitor.py         # DriftMonitor class (Entropy & Hook logic) [cite: 441, 937]
+│   ├── adapter.py         # LocalAdapter class (Path B / TTA logic) [cite: 759, 965]
+│   └── manager.py         # DriftManager class (Decision Layer 4) [cite: 683, 922]
+│
+├── /server                # Federated Server (Layer 4)
+│   ├── server.py          # Flask/gRPC server for FedAvg [cite: 829, 986]
+│   └── global_models/     # Storage for v1.pt, v2.pt, etc. [cite: 837, 999]
+│
+├── /clients               # Simulation of Edge Devices (Layer 1)
+│   ├── client_alpha.py    # Control Client (Clean Data) [cite: 132]
+│   ├── client_beta.py     # Drift Client (Sudden/Gradual Drift) [cite: 133, 134]
+│   └── models/            # Local storage for ResNet18, YOLOv8n [cite: 906, 907]
+│
+├── /assets                # Demo materials
+│   ├── traffic_video.mp4  # Visual demo input [cite: 205]
+│   └── results_graphs/    # Saved output from Demo 1
+│
+├── requirements.txt       # Project dependencies
+└── run_demo.py            # Main entry point to spin up the simulation

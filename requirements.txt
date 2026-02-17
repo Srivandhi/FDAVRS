@@ -1,0 +1,28 @@
+# --- Core AI & Deep Learning ---
+# Standard PyTorch install. 
+# NOTE: For RTX 3050 GPU support, see the special instruction below.
+torch>=2.0.0
+torchvision>=0.15.0
+
+# --- Computer Vision & Image Processing ---
+opencv-python         # For reading video feeds and drawing bounding boxes
+albumentations        # CRITICAL: For simulating drift (rain, fog, blur)
+scikit-image          # For image manipulation metrics
+Pillow                # Standard image handling
+
+# --- YOLO Models (Layer 1) ---
+ultralytics           # For loading YOLOv8n / YOLO11n
+
+# --- Server & Communication (Layer 4) ---
+flask                 # For the Federated Server (Phase 3)
+requests              # For Clients to upload weights (Phase 3)
+
+# --- Data Handling & Math (Layer 2) ---
+numpy                 # For calculating Entropy and buffers
+pandas                # For logging drift stats over time
+scikit-learn          # For additional metrics (if needed)
+
+# --- Visualization & Dashboard ---
+matplotlib            # For plotting the "Accuracy vs. Drift" graphs
+tqdm                  # For progress bars in your training loops
+streamlit             # (Optional) For the real-time dashboard later
