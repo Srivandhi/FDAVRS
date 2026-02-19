@@ -7,6 +7,10 @@ ENV/
 # Data
 data/
 
+# Model files
+*.pth
+*.pt
+
 # Python
 __pycache__/
 *.py[cod]

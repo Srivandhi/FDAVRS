@@ -7,82 +7,95 @@ import time
 import os
 import sys
 
-# --- DYNAMIC PATH RESOLUTION ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+import torch
+import numpy as np
+import random
+
+# --- 1. ADD THIS BLOCK AT THE TOP ---
+def set_seed(seed=42):
+    """Forces the script to be deterministic (Same images every time)"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    print(f"[Setup] Random Seed set to {seed}. Results are now reproducible.")
+
+set_seed(42)  # <--- CALL IT HERE
+# -------------------------------------
+
+# ... rest of your imports and code ...
+
+# --- SDK SETUP ---
+# Add parent directory to path to find the 'sdk' folder
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from sdk.core import FDAVRS
 
 # --- CONFIGURATION ---
 DRIFT_START_ROUND = 50   
 TOTAL_ROUNDS = 100       
 BATCH_SIZE = 32
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Set the corruption type here (e.g., 'fog', 'snow', 'motion_blur', 'brightness')
 CORRUPTION_TYPE = "fog" 
 
-# Paths
+# Dynamic Paths
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.normpath(os.path.join(BASE_DIR, "..", "resnet18_cifar10_trained.pth"))
 CORRUPTION_NPY_PATH = os.path.normpath(os.path.join(BASE_DIR, "..", "data", "CIFAR-10-C", f"{CORRUPTION_TYPE}.npy"))
 LABELS_NPY_PATH = os.path.normpath(os.path.join(BASE_DIR, "..", "data", "CIFAR-10-C", "labels.npy"))
 
-# Visual Settings
-ENABLE_LIVE_LOGS = True  
-LOG_DELAY = 0.05         
-SAVE_GRAPH = True        
-
 class ClientAlphaUnified:
     def __init__(self):
         print(f"[Init] Corruption Mode: {CORRUPTION_TYPE.upper()}")
-        print(f"[Init] Loading Model on {DEVICE}...")
         
-        # 1. Load Model Structure & Weights
+        # 1. Load Client Model
         self.model = torchvision.models.resnet18(weights=None)
         self.model.fc = torch.nn.Linear(self.model.fc.in_features, 10)
         
         if not os.path.exists(MODEL_PATH):
             print(f"[Error] Model not found at: {MODEL_PATH}")
             sys.exit(1)
-            
         self.model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
         self.model = self.model.to(DEVICE)
         self.model.eval()
 
-        # 2. DATA LOADING: CLEAN CIFAR-10
+        # 2. INITIALIZE SDK (The Wrapper)
+        self.sdk = FDAVRS(self.model, feature_layer='avgpool')
+
+        # 3. Load Clean Data
         transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
-        
         clean_root = os.path.normpath(os.path.join(BASE_DIR, "..", "data"))
         clean_dataset = torchvision.datasets.CIFAR10(root=clean_root, train=False, download=True, transform=transform)
         self.clean_loader = torch.utils.data.DataLoader(clean_dataset, batch_size=BATCH_SIZE, shuffle=True)
         self.clean_iter = iter(self.clean_loader)
 
-        # 3. DATA LOADING: CORRUPTED DATA (CIFAR-10-C)
+        # 4. CALIBRATE SDK
+        self.sdk.fit_baseline(self.clean_loader)
+
+        # 5. Load Drift Data
         if not os.path.exists(CORRUPTION_NPY_PATH):
             print(f"[Error] Corruption file NOT found at: {CORRUPTION_NPY_PATH}")
             sys.exit(1)
-
-        # Load .npy files
-        all_drift_images = np.load(CORRUPTION_NPY_PATH)  
-        all_labels = np.load(LABELS_NPY_PATH)      
-
-        # Severity 5: Select the last 10,000 images in the 50,000 image block
-        self.drift_images = all_drift_images[40000:]
+        
+        all_drift = np.load(CORRUPTION_NPY_PATH)
+        all_labels = np.load(LABELS_NPY_PATH)
+        # Use Severity 5 (last 10k images)
+        self.drift_images = all_drift[40000:]
         self.drift_labels = all_labels[40000:]
         self.drift_idx = 0
 
-        self.accuracy_history = []
+        self.history = {'acc': [], 'score': []}
 
     def preprocess_npy(self, batch_images):
-        """Converts raw numpy images to normalized tensors for ResNet"""
         batch_images = batch_images.astype(np.float32) / 255.0
         batch_images = (batch_images - 0.5) / 0.5
-        tensor = torch.tensor(batch_images).permute(0, 3, 1, 2)
-        return tensor
+        return torch.tensor(batch_images).permute(0, 3, 1, 2)
 
     def get_batch(self, round_id):
         if round_id < DRIFT_START_ROUND:
-            # Use Clean CIFAR-10
             try:
                 images, labels = next(self.clean_iter)
             except StopIteration:
@@ -90,65 +103,68 @@ class ClientAlphaUnified:
                 images, labels = next(self.clean_iter)
             status = "CLEAN"
         else:
-            # Use Corrupted Data
             if self.drift_idx + BATCH_SIZE > len(self.drift_images):
-                self.drift_idx = 0 
+                self.drift_idx = 0
             
             img_batch = self.drift_images[self.drift_idx : self.drift_idx + BATCH_SIZE]
             lbl_batch = self.drift_labels[self.drift_idx : self.drift_idx + BATCH_SIZE]
             
             images = self.preprocess_npy(img_batch)
             labels = torch.tensor(lbl_batch).long()
-            
             self.drift_idx += BATCH_SIZE
-            status = f"DRIFT_{CORRUPTION_TYPE.upper()}"
+            status = "DRIFT"
             
         return images.to(DEVICE), labels.to(DEVICE), status
 
     def run_simulation(self):
         print(f"\n[Simulation] Starting {TOTAL_ROUNDS} Rounds...")
-        if ENABLE_LIVE_LOGS:
-            print(f"{'Round':<8} | {'Status':<15} | {'Accuracy':<10} | {'Prediction'}")
-            print("-" * 60)
+        print(f"{'Round':<6} | {'Status':<8} | {'Score':<6} | {'Action':<18} | {'Acc':<5}")
+        print("-" * 65)
 
         for round_id in range(1, TOTAL_ROUNDS + 1):
             images, labels, status = self.get_batch(round_id)
 
-            with torch.no_grad():
-                outputs = self.model(images)
-                _, preds = torch.max(outputs, 1)
+            # --- THE MAGIC LINE ---
+            # Client calls SDK. SDK handles everything.
+            outputs = self.sdk.predict(images)
+            
+            # --- Metrics & Logging ---
+            drift_score = self.sdk.last_metrics['score']
+            action = self.sdk.last_action
+            
+            _, preds = torch.max(outputs, 1)
+            acc = (preds == labels).sum().item() / BATCH_SIZE * 100
+            
+            self.history['acc'].append(acc)
+            self.history['score'].append(drift_score)
 
-            correct = (preds == labels).sum().item()
-            accuracy = (correct / BATCH_SIZE) * 100
-            self.accuracy_history.append(accuracy)
+            print(f"{round_id:<6} | {status:<8} | {drift_score:.2f}   | {action:<18} | {acc:.1f}%")
+            
+            # Small delay for visual effect
+            if round_id % 5 == 0: time.sleep(0.05) 
 
-            if ENABLE_LIVE_LOGS:
-                pred_ex = preds[0].item()
-                print(f"{round_id:<8} | {status:<15} | {accuracy:.1f}%     | Class {pred_ex}")
-                time.sleep(LOG_DELAY)
-
-        if SAVE_GRAPH:
-            self.plot_results()
+        self.plot_results()
 
     def plot_results(self):
-        print("\n[Graph] Rendering reliability report...")
         rounds = range(1, TOTAL_ROUNDS + 1)
+        fig, ax1 = plt.subplots(figsize=(10, 6))
+
+        ax1.set_xlabel('Round')
+        ax1.set_ylabel('Accuracy (%)', color='tab:blue')
+        ax1.plot(rounds, self.history['acc'], color='tab:blue', label='Accuracy')
+        ax1.tick_params(axis='y', labelcolor='tab:blue')
+        ax1.set_ylim(0, 100)
+
+        ax2 = ax1.twinx()
+        ax2.set_ylabel('Drift Score', color='tab:red')
+        ax2.plot(rounds, self.history['score'], color='tab:red', linestyle='--', label='Drift Score')
+        ax2.tick_params(axis='y', labelcolor='tab:red')
+        ax2.set_ylim(0, 1.2)
         
-        plt.figure(figsize=(10, 6))
-        plt.plot(rounds, self.accuracy_history, label='ResNet-18 Accuracy', color='#1f77b4', linewidth=2)
-        plt.axvline(x=DRIFT_START_ROUND, color='red', linestyle='--', label=f'Drift Starts ({CORRUPTION_TYPE})')
-        
-        plt.fill_between(rounds, self.accuracy_history, color='skyblue', alpha=0.3)
-        plt.title(f'Reliability Decay: Clean Data vs. {CORRUPTION_TYPE.capitalize()} Drift', fontsize=14)
-        plt.xlabel('Communication Round', fontsize=12)
-        plt.ylabel('Accuracy (%)', fontsize=12)
-        plt.legend(loc='lower left')
-        plt.grid(True, linestyle=':', alpha=0.6)
-        plt.ylim(0, 105)
-        
-        filename = f"{CORRUPTION_TYPE}_drift_report.png"
-        plt.savefig(filename)
-        print(f"[Graph] Saved to: {os.path.abspath(filename)}")
+        plt.title(f"FDAVRS SDK Performance: {CORRUPTION_TYPE.upper()} Adaptation")
+        fig.tight_layout()
+        plt.savefig(f"{CORRUPTION_TYPE}_sdk_report.png")
+        print(f"\n[Graph] Saved to {os.getcwd()}/{CORRUPTION_TYPE}_sdk_report.png")
         plt.show()
 
 if __name__ == "__main__":

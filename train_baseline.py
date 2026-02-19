@@ -32,7 +32,7 @@ def train_and_save():
     
     # download=False because you manually placed the file
     try:
-        trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=False, transform=transform)
+        trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
         trainloader = torch.utils.data.DataLoader(trainset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
     except RuntimeError:
         print("\n[Error] Dataset not found! Make sure 'cifar-10-python.tar.gz' is in the 'data' folder.")
