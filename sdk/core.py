@@ -29,7 +29,7 @@ class FDAVRS:
 
     def predict(self, images):
         """
-        The Main Loop: Monitor -> Decide -> Adapt -> Predict
+        The Main Loop: Monitor -> Decide -> Synchronize Knowledge -> Predict
         """
         self.model.eval()
         
@@ -41,21 +41,17 @@ class FDAVRS:
         metrics = self.monitor.predict_metrics(logits)
         self.last_metrics = metrics
         
-        action = self.brain.decide(metrics)
-        self.last_action = action
+        brain_action = self.brain.decide(metrics)
+        self.last_action = brain_action # Update status first so it's visible in terminal
         
-        
-        if action == "LOCAL_ADAPTATION":
-            self.adapter.adapt(images)
-            
-            # Verify if it worked
+        # 3. Synchronize Knowledge: Comment the line below to show accuracy WITHOUT adaptation
+        self.last_action = self.adapter.synchronize_knowledge(
+            images, metrics, brain_action, self.monitor, self.brain.low_thresh
+        )
+        # pass
+        # 4. If adaptation occurred, perform one final forward pass for the user's prediction
+        if self.last_action in ["KNOWLEDGE_BRIDGE_CREATED", "PASSIVE_DISCOVERY"]:
             with torch.no_grad():
                 logits = self.model(images)
-            post_metrics = self.monitor.predict_metrics(logits)
-            
-            # If reliability improved, save to the Knowledge Bridge
-            if post_metrics['score'] <= self.brain.low_thresh:
-                self.adapter.save_knowledge_package(post_metrics['score'], metrics)
-                self.last_action = "KNOWLEDGE_BRIDGE_CREATED"
         
         return logits

@@ -10,8 +10,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(BASE_DIR))
 from sdk.core import FDAVRS 
 
-DRIFT_START_ROUND = 25
-TOTAL_ROUNDS = 50
+DRIFT_START_ROUND = 4
+TOTAL_ROUNDS = 8
+QUICK_DEMO = True # Set to True to run only 15 rounds
+if QUICK_DEMO:
+    TOTAL_ROUNDS = 15
+    DRIFT_START_ROUND = 8
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 IMG_FOLDER = os.path.normpath(os.path.join(BASE_DIR, "..", "data", "yolo_data", "coco128", "images", "train2017"))
 SMOOTHING_WINDOW = 5
@@ -46,7 +50,7 @@ class ClientBetaYOLO:
             exit()
             
         self.client_model = YoloConnector(self.yolo_wrapper)
-        self.sdk = FDAVRS(self.client_model, feature_layer='model.model.9', threshold=0.05)
+        self.sdk = FDAVRS(self.client_model, feature_layer='model.model.9', threshold=0.15)
         
         print("[SDK] Calibrating Baseline...")
         self.calibrate_sdk()
@@ -90,7 +94,8 @@ class ClientBetaYOLO:
 
             tensor_img = self.preprocess_for_sdk(frame)
             
-            batch_input = tensor_img.repeat(16, 1, 1, 1)
+            # Reduce repetition from 16 to 8 for speed
+            batch_input = tensor_img.repeat(8, 1, 1, 1)
             
             _ = self.sdk.predict(batch_input)
 
@@ -155,9 +160,14 @@ class ClientBetaYOLO:
         ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper left')
         
         plt.grid(True, linestyle=':', alpha=0.6)
-        filename = "yolo_sdk_final_report.png"
-        plt.savefig(filename)
-        print(f"\n[Graph] Report saved as {filename}")
+        
+        # Save to output folder
+        output_dir = os.path.join(os.path.dirname(BASE_DIR), "output")
+        os.makedirs(output_dir, exist_ok=True)
+        save_path = os.path.join(output_dir, "yolo_sdk_final_report.png")
+        
+        plt.savefig(save_path)
+        print(f"\n[Graph] Report saved as {save_path}")
         plt.show()
 
 if __name__ == "__main__":

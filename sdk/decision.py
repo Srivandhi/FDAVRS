@@ -11,4 +11,4 @@ class DecisionMaker:
         elif score > self.low_thresh:
             return "LOCAL_ADAPTATION"
         else:
-            return "CONTINUE"
+            return "IDLE" # Restoring 'IDLE' label as per user's previous output
