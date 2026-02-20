@@ -1,28 +1,29 @@
 # --- Core AI & Deep Learning ---
 # Standard PyTorch install. 
 # NOTE: For RTX 3050 GPU support, see the special instruction below.
-torch>=2.0.0
-torchvision>=0.15.0
+torch>=2.0.0,<3.0.0
+torchvision>=0.15.0,<1.0.0
 
 # --- Computer Vision & Image Processing ---
-opencv-python         # For reading video feeds and drawing bounding boxes
-albumentations        # CRITICAL: For simulating drift (rain, fog, blur)
-scikit-image          # For image manipulation metrics
-Pillow                # Standard image handling
+opencv-python>=4.8.0         # For reading video feeds and drawing bounding boxes
+albumentations>=1.4.0        # CRITICAL: For simulating drift (rain, fog, blur)
+scikit-image>=0.21.0         # For image manipulation metrics
+Pillow>=10.0.0               # Standard image handling
 
 # --- YOLO Models (Layer 1) ---
-ultralytics           # For loading YOLOv8n / YOLO11n
+ultralytics>=8.0.0           # For loading YOLOv8n / YOLO11n
 
 # --- Server & Communication (Layer 4) ---
-flask                 # For the Federated Server (Phase 3)
-requests              # For Clients to upload weights (Phase 3)
+flask>=2.3.0                 # For the Federated Server (Phase 3)
+requests>=2.31.0             # For Clients to upload weights (Phase 3)
 
 # --- Data Handling & Math (Layer 2) ---
-numpy                 # For calculating Entropy and buffers
-pandas                # For logging drift stats over time
-scikit-learn          # For additional metrics (if needed)
+numpy>=1.24.0,<2.0.0         # For calculating Entropy and buffers
+pandas>=2.0.0                # For logging drift stats over time
+scipy>=1.11.0                # For cosine distance calculations in drift detection
+scikit-learn>=1.3.0          # For additional metrics (if needed)
 
 # --- Visualization & Dashboard ---
-matplotlib            # For plotting the "Accuracy vs. Drift" graphs
-tqdm                  # For progress bars in your training loops
-streamlit             # (Optional) For the real-time dashboard later
+matplotlib>=3.7.0            # For plotting the "Accuracy vs. Drift" graphs
+tqdm>=4.66.0                 # For progress bars in your training loops
+streamlit>=1.28.0            # (Optional) For the real-time dashboard later
