@@ -11,6 +11,10 @@ data/
 *.pth
 *.pt
 
+# Output and local knowledge
+output/
+local_knowledge_vault/
+
 # Python
 __pycache__/
 *.py[cod]

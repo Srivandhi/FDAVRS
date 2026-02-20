@@ -6,14 +6,10 @@ import matplotlib.pyplot as plt
 import time
 import os
 import sys
-
-import torch
-import numpy as np
 import random
 
-# --- 1. ADD THIS BLOCK AT THE TOP ---
+# --- 1. SEED SETUP ---
 def set_seed(seed=42):
-    """Forces the script to be deterministic (Same images every time)"""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -21,68 +17,62 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
     print(f"[Setup] Random Seed set to {seed}. Results are now reproducible.")
 
-set_seed(42)  # <--- CALL IT HERE
-# -------------------------------------
+set_seed(42)
 
-# ... rest of your imports and code ...
+# --- 2. PATH & SDK SETUP ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Define ROOT_DIR globally so it's accessible everywhere
+ROOT_DIR = os.path.normpath(os.path.join(BASE_DIR, ".."))
 
-# --- SDK SETUP ---
-# Add parent directory to path to find the 'sdk' folder
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(ROOT_DIR)
 from sdk.core import FDAVRS
 
-# --- CONFIGURATION ---
+# --- 3. CONFIGURATION ---
 DRIFT_START_ROUND = 50   
 TOTAL_ROUNDS = 100       
 BATCH_SIZE = 32
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CORRUPTION_TYPE = "fog" 
 
-# Dynamic Paths
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.normpath(os.path.join(BASE_DIR, "..", "resnet18_cifar10_trained.pth"))
-CORRUPTION_NPY_PATH = os.path.normpath(os.path.join(BASE_DIR, "..", "data", "CIFAR-10-C", f"{CORRUPTION_TYPE}.npy"))
-LABELS_NPY_PATH = os.path.normpath(os.path.join(BASE_DIR, "..", "data", "CIFAR-10-C", "labels.npy"))
+MODEL_PATH = os.path.join(ROOT_DIR, "resnet18_cifar10_trained.pth")
+CORRUPTION_NPY_PATH = os.path.join(ROOT_DIR, "data", "CIFAR-10-C", f"{CORRUPTION_TYPE}.npy")
+LABELS_NPY_PATH = os.path.join(ROOT_DIR, "data", "CIFAR-10-C", "labels.npy")
+OUTPUT_DIR = os.path.join(ROOT_DIR, "output")
 
 class ClientAlphaUnified:
     def __init__(self):
         print(f"[Init] Corruption Mode: {CORRUPTION_TYPE.upper()}")
         
-        # 1. Load Client Model
+        # Load Model
         self.model = torchvision.models.resnet18(weights=None)
         self.model.fc = torch.nn.Linear(self.model.fc.in_features, 10)
         
         if not os.path.exists(MODEL_PATH):
             print(f"[Error] Model not found at: {MODEL_PATH}")
             sys.exit(1)
+            
         self.model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
-        self.model = self.model.to(DEVICE)
-        self.model.eval()
+        self.model = self.model.to(DEVICE).eval()
 
-        # 2. INITIALIZE SDK (The Wrapper)
+        # Initialize SDK
         self.sdk = FDAVRS(self.model, feature_layer='avgpool')
 
-        # 3. Load Clean Data
+        # Load Clean Data
         transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
-        clean_root = os.path.normpath(os.path.join(BASE_DIR, "..", "data"))
+        clean_root = os.path.join(ROOT_DIR, "data")
         clean_dataset = torchvision.datasets.CIFAR10(root=clean_root, train=False, download=True, transform=transform)
         self.clean_loader = torch.utils.data.DataLoader(clean_dataset, batch_size=BATCH_SIZE, shuffle=True)
         self.clean_iter = iter(self.clean_loader)
 
-        # 4. CALIBRATE SDK
+        # Calibrate SDK
         self.sdk.fit_baseline(self.clean_loader)
 
-        # 5. Load Drift Data
-        if not os.path.exists(CORRUPTION_NPY_PATH):
-            print(f"[Error] Corruption file NOT found at: {CORRUPTION_NPY_PATH}")
-            sys.exit(1)
-        
+        # Load Drift Data
         all_drift = np.load(CORRUPTION_NPY_PATH)
         all_labels = np.load(LABELS_NPY_PATH)
-        # Use Severity 5 (last 10k images)
         self.drift_images = all_drift[40000:]
         self.drift_labels = all_labels[40000:]
         self.drift_idx = 0
@@ -123,12 +113,10 @@ class ClientAlphaUnified:
 
         for round_id in range(1, TOTAL_ROUNDS + 1):
             images, labels, status = self.get_batch(round_id)
-
-            # --- THE MAGIC LINE ---
-            # Client calls SDK. SDK handles everything.
+            
+            # Predict via SDK
             outputs = self.sdk.predict(images)
             
-            # --- Metrics & Logging ---
             drift_score = self.sdk.last_metrics['score']
             action = self.sdk.last_action
             
@@ -139,9 +127,7 @@ class ClientAlphaUnified:
             self.history['score'].append(drift_score)
 
             print(f"{round_id:<6} | {status:<8} | {drift_score:.2f}   | {action:<18} | {acc:.1f}%")
-            
-            # Small delay for visual effect
-            if round_id % 5 == 0: time.sleep(0.05) 
+            if round_id % 5 == 0: time.sleep(0.01) 
 
         self.plot_results()
 
@@ -163,8 +149,13 @@ class ClientAlphaUnified:
         
         plt.title(f"FDAVRS SDK Performance: {CORRUPTION_TYPE.upper()} Adaptation")
         fig.tight_layout()
-        plt.savefig(f"{CORRUPTION_TYPE}_sdk_report.png")
-        print(f"\n[Graph] Saved to {os.getcwd()}/{CORRUPTION_TYPE}_sdk_report.png")
+        
+        # Ensure output directory exists
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        save_path = os.path.join(OUTPUT_DIR, f"{CORRUPTION_TYPE}_sdk_report.png")
+        
+        plt.savefig(save_path)
+        print(f"\n[Graph] Report safely stored in the output folder: {save_path}")
         plt.show()
 
 if __name__ == "__main__":

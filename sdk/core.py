@@ -44,18 +44,18 @@ class FDAVRS:
         action = self.brain.decide(metrics)
         self.last_action = action
         
-        # 3. Take Action
+        
         if action == "LOCAL_ADAPTATION":
-            # Fix the model stats
             self.adapter.adapt(images)
             
-
-            # Re-run inference with fixed model
+            # Verify if it worked
             with torch.no_grad():
                 logits = self.model(images)
-                
-        elif action == "SERVER_UPDATE_REQUIRED":
-            # (Placeholder for Phase 3 Upload)
-            pass
+            post_metrics = self.monitor.predict_metrics(logits)
             
+            # If reliability improved, save to the Knowledge Bridge
+            if post_metrics['score'] <= self.brain.low_thresh:
+                self.adapter.save_knowledge_package(post_metrics['score'], metrics)
+                self.last_action = "KNOWLEDGE_BRIDGE_CREATED"
+        
         return logits
